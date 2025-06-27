@@ -61,7 +61,7 @@ IGNORE_LIST = [
 def filter_scraped_links() -> None:
     """
     Reads the raw scraped CSV, filters out unwanted links using an ignore list,
-    and writes the clean data to a new CSV file using Polars.
+    removes duplicates, and writes the clean data to a new CSV file using Polars.
     """
     print("--- Starting Link Filtering Process with Polars ---")
 
@@ -93,7 +93,7 @@ def filter_scraped_links() -> None:
         initial_link_count = df_cleaned.height
         print(f"[*] Exploded data into {initial_link_count} individual, non-empty links.")
 
-        # 3. Filter the links
+        # 3. Filter the links based on rules
         #    Step 3a: Remove links that are just a single forward slash "/"
         #    This is done before the more complex regex matching for efficiency.
         df_cleaned = df_cleaned.filter(pl.col("found_link") != "/")
@@ -103,19 +103,31 @@ def filter_scraped_links() -> None:
         filtered_df = df_cleaned.filter(
             ~pl.col("found_link").str.contains(ignore_pattern)
         )
-        final_link_count = filtered_df.height
+        count_after_rules = filtered_df.height
+        removed_by_rules = initial_link_count - count_after_rules
+        print(f"[*] Removed {removed_by_rules} links based on the ignore list and other rules.")
 
-        # 4. Write the final, clean data to a new CSV
-        filtered_df.write_csv(OUTPUT_CSV_FILE)
+
+        # 4. Remove duplicate links
+        #    Now that we have our clean list, we remove any exact duplicates.
+        #    The `.unique()` method is highly optimized for this task.
+        deduplicated_df = filtered_df.unique(subset=["found_link"])
+        final_link_count = deduplicated_df.height
+        duplicates_removed = count_after_rules - final_link_count
+        print(f"[*] Removed {duplicates_removed} duplicate links.")
+
+        # 5. Write the final, clean data to a new CSV
+        deduplicated_df.write_csv(OUTPUT_CSV_FILE)
 
         # --- Final summary message ---
-        removed_count = initial_link_count - final_link_count
         print("\n" + "="*50)
         print("FILTERING COMPLETE")
         print("="*50 + "\n")
         print(f"[+] Initial non-empty links found: {initial_link_count}")
-        print(f"[+] Links removed by filtering rules (e.g., '/', ignore list): {removed_count}")
-        print(f"[+] Final download links kept: {final_link_count}")
+        print(f"[+] Links removed by ignore list/rules: {removed_by_rules}")
+        print(f"[+] Duplicate links removed: {duplicates_removed}")
+        print("--------------------------------------------------")
+        print(f"[+] Final unique download links kept: {final_link_count}")
         print(f"\n[SUCCESS] Filtered data saved to '{OUTPUT_CSV_FILE}'")
 
     except FileNotFoundError:
